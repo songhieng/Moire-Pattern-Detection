@@ -30,7 +30,7 @@ def main(args):
     negativeImagePath = (args.negativeTestImages)
     
     os.system("python createTrainingData.py {} {} {}".format(positiveImagePath, negativeImagePath, 1))
-    X_LL, X_LH, X_HL, X_HH, X_index, Y, imageCount = readWaveletData(positiveImagePath, negativeImagePath, positiveTestImagePath, positiveTestImagePath)
+    X_LL, X_LH, X_HL, X_HH, X_index, Y, imageCount = readWaveletData(positiveImagePath, negativeImagePath, positiveTestImagePath, negativeTestImagePath)
     
     X_LL = np.array(X_LL)
     X_LL = X_LL.reshape((imageCount, height, width, depth))
