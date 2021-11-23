@@ -62,6 +62,12 @@ def augmentAndTrasformImage(f, mainFolder, trainFolder):
     except:
         print('Error: Couldnt read the file {}. Make sure only images are present in the folder'.format(f))
         return None
+        
+    w, h = img.size
+    if h > w:
+        img = img.resize((750, 1000))
+    else:
+        img = img.resize((1000, 750))
 
     imgGray = img.convert('L')
     wdChk, htChk = imgGray.size
