@@ -241,10 +241,16 @@ def trainCNNModel(X_LL_train,X_LH_train,X_HL_train,X_HH_train,y_train,
     Y_test = to_categorical(y_test, num_classes) # One-hot encode the labels
 
     checkPointFolder = 'checkPoint'
-    checkpoint_name = checkPointFolder + '/Weights-{epoch:03d}--{val_loss:.5f}.hdf5' 
-    checkpoint = ModelCheckpoint(checkpoint_name, monitor='val_loss', verbose = 1, save_best_only = True, mode ='auto')
+    checkpoint_name = checkPointFolder + '/Weights-{epoch:03d}--{val_loss:.5f}.keras'
+    checkpoint = ModelCheckpoint(
+        checkpoint_name,
+        monitor='val_loss',
+        verbose=1,
+        save_best_only=True,
+        mode='auto'
+    )
     callbacks_list = [checkpoint]
-    
+
     if not os.path.exists(checkPointFolder):
         os.makedirs(checkPointFolder)
         
