@@ -1,11 +1,11 @@
 #!/usr/bin/env python
-from matplotlib import pyplot as plt
-import numpy as np
 import sys
 import argparse
+import os
 from os import listdir
 from os.path import isfile, join
-import os
+
+import numpy as np
 from PIL import Image
 from sklearn import preprocessing
 from sklearn.model_selection import train_test_split
@@ -14,227 +14,161 @@ from keras.callbacks import Callback
 from mCNN import createModel
 
 # constants
-WIDTH = 500  # 384
-HEIGHT = 375  # 512
+WIDTH  = 500
+HEIGHT = 375
 
 def scaleData(inp, minimum, maximum):
-    minMaxScaler = preprocessing.MinMaxScaler(copy=True, feature_range=(minimum, maximum))
-    inp = inp.reshape(-1, 1)
-    inp = minMaxScaler.fit_transform(inp)
-    return inp
+    scaler = preprocessing.MinMaxScaler(feature_range=(minimum, maximum))
+    arr = inp.reshape(-1, 1)
+    return scaler.fit_transform(arr)
 
-def readAndScaleImage(f, customStr, trainImagePath,
-                      X_LL, X_LH, X_HL, X_HH, X_index, Y,
-                      sampleIndex, sampleVal):
-    fname = os.path.splitext(f)[0]
-    fLL = f.replace(fname, fname + customStr + '_LL').replace('.jpg', '.tiff')
-    fLH = f.replace(fname, fname + customStr + '_LH').replace('.jpg', '.tiff')
-    fHL = f.replace(fname, fname + customStr + '_HL').replace('.jpg', '.tiff')
-    fHH = f.replace(fname, fname + customStr + '_HH').replace('.jpg', '.tiff')
-
+def readAndScaleImage(fname, suffix, srcDir, 
+                      X_LL, X_LH, X_HL, X_HH, X_idx, Y, idx, label):
+    base = os.path.splitext(fname)[0]
+    names = {
+        'LL': fname.replace(base, base + suffix + '_LL').replace('.jpg', '.tiff'),
+        'LH': fname.replace(base, base + suffix + '_LH').replace('.jpg', '.tiff'),
+        'HL': fname.replace(base, base + suffix + '_HL').replace('.jpg', '.tiff'),
+        'HH': fname.replace(base, base + suffix + '_HH').replace('.jpg', '.tiff'),
+    }
     try:
-        imgLL = Image.open(join(trainImagePath, fLL))
-        imgLH = Image.open(join(trainImagePath, fLH))
-        imgHL = Image.open(join(trainImagePath, fHL))
-        imgHH = Image.open(join(trainImagePath, fHH))
+        imgs = {k: np.array(Image.open(join(srcDir, n))) for k, n in names.items()}
     except Exception as e:
-        print(f"Error: Couldn't read the file {fname}. Make sure only images are present.")
-        print("Exception:", e)
-        return None
+        print(f"Error reading {base}{suffix}: {e}")
+        return False
 
-    imgLL = scaleData(np.array(imgLL), 0, 1).reshape(1, WIDTH * HEIGHT)
-    imgLH = scaleData(np.array(imgLH), -1, 1).reshape(1, WIDTH * HEIGHT)
-    imgHL = scaleData(np.array(imgHL), -1, 1).reshape(1, WIDTH * HEIGHT)
-    imgHH = scaleData(np.array(imgHH), -1, 1).reshape(1, WIDTH * HEIGHT)
-
-    X_LL[sampleIndex, :] = imgLL
-    X_LH[sampleIndex, :] = imgLH
-    X_HL[sampleIndex, :] = imgHL
-    X_HH[sampleIndex, :] = imgHH
-    Y[sampleIndex, 0]    = sampleVal
-    X_index[sampleIndex, 0] = sampleIndex
-
+    # scale and flatten
+    X_LL[idx] = scaleData(imgs['LL'],  0,  1).reshape(-1)
+    X_LH[idx] = scaleData(imgs['LH'], -1,  1).reshape(-1)
+    X_HL[idx] = scaleData(imgs['HL'], -1,  1).reshape(-1)
+    X_HH[idx] = scaleData(imgs['HH'], -1,  1).reshape(-1)
+    Y[idx, 0]    = label
+    X_idx[idx,0] = idx
     return True
 
-def readImageSet(imageFiles, trainImagePath,
-                 X_LL, X_LH, X_HL, X_HH, X_index, Y,
-                 sampleIndex, bClass):
-    for f in imageFiles:
-        ret = readAndScaleImage(f, '', trainImagePath,
-                                X_LL, X_LH, X_HL, X_HH, X_index, Y,
-                                sampleIndex, bClass)
-        if ret:
-            sampleIndex += 1
-        ret = readAndScaleImage(f, '_180', trainImagePath,
-                                X_LL, X_LH, X_HL, X_HH, X_index, Y,
-                                sampleIndex, bClass)
-        if ret:
-            sampleIndex += 1
-        ret = readAndScaleImage(f, '_180_FLIP', trainImagePath,
-                                X_LL, X_LH, X_HL, X_HH, X_index, Y,
-                                sampleIndex, bClass)
-        if ret:
-            sampleIndex += 1
-    return sampleIndex
+def readWaveletData(posDir, negDir, posTDir, negTDir):
+    posFiles = [f for f in listdir(posDir) if isfile(join(posDir, f))]
+    negFiles = [f for f in listdir(negDir) if isfile(join(negDir, f))]
+    posCount = len(posFiles) * 3  # each file yields 3 variants
+    negCount = len(negFiles) * 3
+    total    = posCount + negCount
 
-def readWaveletData(posPath, negPath, posTrainPath, negTrainPath):
-    posFiles = [f for f in listdir(posPath) if isfile(join(posPath, f))]
-    negFiles = [f for f in listdir(negPath) if isfile(join(negPath, f))]
-    posCount = len(posFiles) * 4
-    negCount = len(negFiles) * 4
-    total   = posCount + negCount
-
-    print(f"positive samples: {posCount}")
-    print(f"negative samples: {negCount}")
-
-    X_LL   = np.zeros((total, WIDTH * HEIGHT))
-    X_LH   = np.zeros((total, WIDTH * HEIGHT))
-    X_HL   = np.zeros((total, WIDTH * HEIGHT))
-    X_HH   = np.zeros((total, WIDTH * HEIGHT))
-    X_index= np.zeros((total, 1))
-    Y      = np.zeros((total, 1))
+    X_LL    = np.zeros((total, WIDTH * HEIGHT))
+    X_LH    = np.zeros((total, WIDTH * HEIGHT))
+    X_HL    = np.zeros((total, WIDTH * HEIGHT))
+    X_HH    = np.zeros((total, WIDTH * HEIGHT))
+    X_idx   = np.zeros((total, 1))
+    Y       = np.zeros((total, 1))
 
     idx = 0
-    idx = readImageSet(posFiles, posTrainPath, X_LL, X_LH, X_HL, X_HH, X_index, Y, idx, 0)
-    print("positive data loaded.")
-    idx = readImageSet(negFiles, negTrainPath, X_LL, X_LH, X_HL, X_HH, X_index, Y, idx, 1)
-    print("negative data loaded.")
-    print(f"Total Samples Loaded: {idx}")
+    for f in posFiles:
+        for suffix in ['', '_180', '_180_FLIP']:
+            if readAndScaleImage(f, suffix, posTDir, X_LL, X_LH, X_HL, X_HH, X_idx, Y, idx, 0):
+                idx += 1
+    for f in negFiles:
+        for suffix in ['', '_180', '_180_FLIP']:
+            if readAndScaleImage(f, suffix, negTDir, X_LL, X_LH, X_HL, X_HH, X_idx, Y, idx, 1):
+                idx += 1
 
-    return X_LL, X_LH, X_HL, X_HH, X_index, Y, total
+    print(f"Loaded {idx} samples ({posCount} positive, {negCount} negative)")
+    return X_LL, X_LH, X_HL, X_HH, X_idx, Y, idx
 
-def splitTrainTestDataForBands(data, train_idx, test_idx):
-    train = np.zeros((len(train_idx), WIDTH * HEIGHT))
-    test  = np.zeros((len(test_idx),  WIDTH * HEIGHT))
-    for i, ind in enumerate(train_idx[:,0]):
-        train[i, :] = data[int(ind), :]
-    for i, ind in enumerate(test_idx[:,0]):
-        test[i, :]  = data[int(ind), :]
-    return train, test
-
-def trainTestSplit(X_LL, X_LH, X_HL, X_HH, X_index, Y, totalCount):
-    test_frac = 0.1
-    X_train_idx, X_test_idx, y_train, y_test = train_test_split(
-        X_index, Y, test_size=test_frac, random_state=1, stratify=Y
+def trainTestSplit(X_LL, X_LH, X_HL, X_HH, X_idx, Y, totalCount):
+    # split indices & labels
+    X_tr_idx, X_te_idx, y_tr, y_te = train_test_split(
+        X_idx, Y, test_size=0.1, random_state=1, stratify=Y
     )
+    tr_idx = X_tr_idx.flatten().astype(int)
+    te_idx = X_te_idx.flatten().astype(int)
 
-    X_LL_train, X_LL_test = splitTrainTestDataForBands(X_LL, X_train_idx, X_test_idx)
-    X_LH_train, X_LH_test = splitTrainTestDataForBands(X_LH, X_train_idx, X_test_idx)
-    X_HL_train, X_HL_test = splitTrainTestDataForBands(X_HL, X_train_idx, X_test_idx)
-    X_HH_train, X_HH_test = splitTrainTestDataForBands(X_HH, X_train_idx, X_test_idx)
+    # gather data
+    X_LL_tr = X_LL[tr_idx];  X_LL_te = X_LL[te_idx]
+    X_LH_tr = X_LH[tr_idx];  X_LH_te = X_LH[te_idx]
+    X_HL_tr = X_HL[tr_idx];  X_HL_te = X_HL[te_idx]
+    X_HH_tr = X_HH[tr_idx];  X_HH_te = X_HH[te_idx]
 
-    num_train = len(y_train)
-    # reshape for CNN inputs
-    def reshape(x):
-        return x.reshape((num_train if x is X_LL_train else totalCount - num_train,
-                          HEIGHT, WIDTH, 1))
+    # reshape using actual row counts
+    n_tr = len(y_tr)
+    n_te = len(y_te)
+    X_LL_tr = X_LL_tr.reshape((n_tr, HEIGHT, WIDTH, 1))
+    X_LH_tr = X_LH_tr.reshape((n_tr, HEIGHT, WIDTH, 1))
+    X_HL_tr = X_HL_tr.reshape((n_tr, HEIGHT, WIDTH, 1))
+    X_HH_tr = X_HH_tr.reshape((n_tr, HEIGHT, WIDTH, 1))
+    X_LL_te = X_LL_te.reshape((n_te, HEIGHT, WIDTH, 1))
+    X_LH_te = X_LH_te.reshape((n_te, HEIGHT, WIDTH, 1))
+    X_HL_te = X_HL_te.reshape((n_te, HEIGHT, WIDTH, 1))
+    X_HH_te = X_HH_te.reshape((n_te, HEIGHT, WIDTH, 1))
 
-    X_LL_train = reshape(X_LL_train)
-    X_LH_train = reshape(X_LH_train)
-    X_HL_train = reshape(X_HL_train)
-    X_HH_train = reshape(X_HH_train)
-    X_LL_test  = reshape(X_LL_test)
-    X_LH_test  = reshape(X_LH_test)
-    X_HL_test  = reshape(X_HL_test)
-    X_HH_test  = reshape(X_HH_test)
+    return (X_LL_tr, X_LH_tr, X_HL_tr, X_HH_tr, y_tr,
+            X_LL_te, X_LH_te, X_HL_te, X_HH_te, y_te)
 
-    return (X_LL_train, X_LH_train, X_HL_train, X_HH_train,
-            y_train, X_LL_test, X_LH_test, X_HL_test, X_HH_test, y_test)
-
-def trainCNNModel(X_LL_train, X_LH_train, X_HL_train, X_HH_train, y_train,
-                  X_LL_test,  X_LH_test,  X_HL_test,  X_HH_test,  y_test,
-                  num_epochs):
+def trainCNNModel(X_LL_tr, X_LH_tr, X_HL_tr, X_HH_tr, y_tr,
+                  X_LL_te, X_LH_te, X_HL_te, X_HH_te, y_te,
+                  epochs):
 
     batch_size = 32
-    num_classes = len(np.unique(y_train))
-    Y_train = to_categorical(y_train, num_classes)
-    Y_test  = to_categorical(y_test, num_classes)
+    num_classes = len(np.unique(y_tr))
+    Y_tr = to_categorical(y_tr, num_classes)
+    Y_te = to_categorical(y_te, num_classes)
 
-    checkpoint_folder = 'checkPoint'
-    os.makedirs(checkpoint_folder, exist_ok=True)
+    # checkpoint folder
+    ckpt = 'checkPoint'
+    os.makedirs(ckpt, exist_ok=True)
 
-    class SaveEvery10Epochs(Callback):
-        def __init__(self, folder):
-            super().__init__()
-            self.folder = folder
-
+    class SaveEvery10(Callback):
+        def __init__(self, folder): super().__init__(); self.folder = folder
         def on_epoch_end(self, epoch, logs=None):
-            epoch_num = epoch + 1
-            if epoch_num % 10 == 0:
-                val_loss = logs.get('val_loss')
-                fname = f"Weights-{epoch_num:03d}--{val_loss:.5f}.keras"
-                path = os.path.join(self.folder, fname)
-                self.model.save(path)
-                print(f"\n✅ Saved model at epoch {epoch_num} → {path}")
+            e = epoch + 1
+            if e % 10 == 0:
+                loss = logs.get('val_loss')
+                fn = f"Weights-{e:03d}--{loss:.5f}.keras"
+                self.model.save(join(self.folder, fn))
+                print(f"\nSaved epoch {e} → {fn}")
 
-    save_cb = SaveEvery10Epochs(checkpoint_folder)
-
-    model = createModel(HEIGHT, WIDTH, 1, num_classes)
-    model.compile(
-        loss='categorical_crossentropy',
-        optimizer='adam',
-        metrics=['accuracy']
-    )
-
+    cb = SaveEvery10(ckpt)
+    model = createModel(HEIGHT, WIDTH, depth=1, num_classes=num_classes)
+    model.compile(loss='categorical_crossentropy', optimizer='adam', metrics=['accuracy'])
     model.fit(
-        [X_LL_train, X_LH_train, X_HL_train, X_HH_train],
-        Y_train,
-        batch_size=batch_size,
-        epochs=num_epochs,
-        verbose=1,
-        validation_split=0.1,
-        callbacks=[save_cb]
+        [X_LL_tr, X_LH_tr, X_HL_tr, X_HH_tr], Y_tr,
+        batch_size=batch_size, epochs=epochs,
+        validation_split=0.1, callbacks=[cb], verbose=1
     )
-
-    # Optionally save final model
     model.save('moirePattern3CNN_final.keras')
-
     return model
 
-def evaluate(model, X_LL_test, X_LH_test, X_HL_test, X_HH_test, y_test):
-    preds = model.predict([X_LL_test, X_LH_test, X_HL_test, X_HH_test])
+def evaluate(model, X_LL_te, X_LH_te, X_HL_te, X_HH_te, y_te):
+    preds = model.predict([X_LL_te, X_LH_te, X_HL_te, X_HH_te])
     TP = TN = FP = FN = 0
-    for i in range(len(y_test)):
-        true = int(y_test[i])
-        pred = int(np.argmax(preds[i]))
-        if true == 0 and pred == 0: TP += 1
-        if true == 1 and pred == 1: TN += 1
-        if true == 1 and pred == 0: FN += 1
-        if true == 0 and pred == 1: FP += 1
-
+    for i, true in enumerate(y_te.flatten()):
+        pred = preds[i].argmax()
+        if true == 0:
+            if pred == 0: TP += 1
+            else: FP += 1
+        else:
+            if pred == 1: TN += 1
+            else: FN += 1
     total = TP + TN + FP + FN
-    accuracy  = 100 * (TP + TN) / total
-    precision = 100 * TP / (TP + FP) if (TP + FP) else 0
-    recall    = 100 * TP / (TP + FN) if (TP + FN) else 0
-
-    print("\n\033[1mconfusion matrix (test)\033[0m")
-    print(f" true positive:  {TP}")
-    print(f" false positive: {FP}")
-    print(f" true negative:  {TN}")
-    print(f" false negative: {FN}")
-    print(f"\n\033[1maccuracy:  \033[0m{accuracy:.4f} %")
-    print(f"\033[1mprecision: \033[0m{precision:.4f} %")
-    print(f"\033[1mrecall:    \033[0m{recall:.4f} %")
+    print(f"Accuracy:  {100*(TP+TN)/total:.2f}%")
+    print(f"Precision: {100*TP/(TP+FP):.2f}%")
+    print(f"Recall:    {100*TP/(TP+FN):.2f}%")
 
 def parse_arguments(argv):
-    parser = argparse.ArgumentParser()
-    parser.add_argument('positiveImages', type=str, help='Dir with positive (Moire) images.')
-    parser.add_argument('negativeImages', type=str, help='Dir with negative (Normal) images.')
-    parser.add_argument('trainingDataPositive', type=str, help='Dir with transformed positive images.')
-    parser.add_argument('trainingDataNegative', type=str, help='Dir with transformed negative images.')
-    parser.add_argument('epochs', type=int, help='Number of epochs for training')
-    return parser.parse_args(argv)
+    p = argparse.ArgumentParser()
+    p.add_argument('positiveImages', help='Dir with Moiré images.')
+    p.add_argument('negativeImages', help='Dir with normal images.')
+    p.add_argument('trainingDataPositive', help='Dir with augmented Moiré.')
+    p.add_argument('trainingDataNegative', help='Dir with augmented normal.')
+    p.add_argument('epochs', type=int, help='Number of epochs.')
+    return p.parse_args(argv)
 
 def main(args):
     X_LL, X_LH, X_HL, X_HH, X_idx, Y, total = readWaveletData(
-        args.positiveImages,
-        args.negativeImages,
-        args.trainingDataPositive,
-        args.trainingDataNegative
+        args.positiveImages, args.negativeImages,
+        args.trainingDataPositive, args.trainingDataNegative
     )
 
-    (X_LL_tr, X_LH_tr, X_HL_tr, X_HH_tr,
-     y_tr, X_LL_te, X_LH_te, X_HL_te, X_HH_te, y_te) = trainTestSplit(
+    (X_LL_tr, X_LH_tr, X_HL_tr, X_HH_tr, y_tr,
+     X_LL_te, X_LH_te, X_HL_te, X_HH_te, y_te) = trainTestSplit(
         X_LL, X_LH, X_HL, X_HH, X_idx, Y, total
     )
 
